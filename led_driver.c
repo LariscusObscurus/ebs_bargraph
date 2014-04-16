@@ -1,6 +1,7 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/types.h>
+#include <linux/interrupt.h>
 
 /* char device */
 #include <linux/fs.h>
@@ -10,7 +11,22 @@
 
 #include <asm/hardware/lpc24xx.h>
 
-#define DEVICE_NAME "led_driver"
+#define DEVICE_NAME	"led_driver"
+#define LED_DRIVER_IRQ	9 /* According to "/proc/interupts" this is correct*/
+
+#define I20CONSET_I2EN	0x00000040
+#define I20CONSET_AA	0x00000004
+#define I20CONSET_SI	0x00000008
+#define I20CONSET_STO	0x00000010
+#define I20CONSET_STA	0x00000020
+
+#define I20CONCLR_AA	0x00000004
+#define I20CONCLR_SI	0x00000008
+#define I20CONCLR_STA	0x00000020
+#define I20CONCLR_I2EN	0x00000040
+
+#define I20SCLH_SCLH	0x00000080
+#define I20SCLL_SCLL	0x00000080
 
 /* Write or read a whole register at once  */
 #define m_reg_read(reg) (*(volatile unsigned long *)(reg))
@@ -97,6 +113,22 @@ static int led_driver_open(struct inode* inode,
 	inuse++;
 	led_driver_dev.inuse = *inuse;
 	led_driver_dev.eof = 0;
+	
+	m_reg_set(PCONP, (1 << 7)); /* Make sure I2C0 is powered */
+	/*XXX: set bit 23 & 25 to 0*/
+	m_reg_set(PINSEL1, (1<<22)); /* SDA0 */
+	m_reg_set(PINSEL1, (1<<24)); /* SCL0 */
+	
+	/* Reset I20CONSET */
+	m_reg_write(I20CONCLR, I20CONCLR_AA 
+			| I20CONCLR_SI 
+			| I20CONCLR_STA 
+			| I20CONCLR_I2EN);
+
+	m_reg_set(I20SCLL, I20SCLL_SCLL);
+	m_reg_set(I20SCLH, I20SCLH_SCLH);
+
+
 	return 0;
 }
 
