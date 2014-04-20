@@ -135,8 +135,9 @@ static int led_driver_setup(struct led_driver *dev)
 
 static irqreturn_t led_driver_isr(int irq, void *dev_id)
 {
-	u32 stat_value = m_reg_read(I20STAT);
+	unsigned long stat_value = m_reg_read(I20STAT);
 	(void)printk("DEBUG: IRQ\n");
+	(void)printk("DEBUG: CONSET 0x%x\n", m_reg_read(I20CONSET));
 	switch(stat_value)
 	{
 	case 0x08:	/* STA issued */
@@ -186,22 +187,10 @@ static irqreturn_t led_driver_isr(int irq, void *dev_id)
 
 static int i2c_start(void)
 {
-	u32 timeout = 0;
-	int ret = -1;
-
 	m_reg_set(I20CONSET, I20CONSET_STA);
+	(void)printk("DEBUG: i2c_start CONSET 0x%x\n", m_reg_read(I20CONSET));
 
-	while(1) {
-		if(i2c_state == I2C_STARTED) {
-			ret = 0;
-			break;
-		} else if(timeout >= MAX_TIMEOUT) {
-			ret = -1;
-			break;
-		}
-		timeout++;
-	}
-	return ret;
+	return 0;
 }
 
 static int i2c_stop(void)
@@ -213,34 +202,14 @@ static int i2c_stop(void)
 
 static int i2c_transaction(void)
 {
-	i2c_state = I2C_IDLE;
-	i2c_buffer_index = 0;
-	u32 timeout = 0;
+	i2c_start();
 
-	if(i2c_start() < 0) {
-		i2c_stop();
-		return -1;
-	}
-	(void)printk("DEBUG: STA ok\n");
-	while(1) {
-		if((i2c_state == DATA_NACK) || (i2c_state == DATA_FIN)) {
-			i2c_stop();
-			break;
-		} else if(timeout >= MAX_TIMEOUT) {
-			(void)printk("ERROR: I2C Transaction timed out\n");
-			return -1;
-		} else if((i2c_state == DATA_ACK)) {
-			timeout = 0;
-		}
-		timeout++;
-	}
 	return 0;
 }
 
 static int led_driver_open(struct inode* inode,
 			struct file* file)
 {
-	volatile u32 tmp = 0;
 	u8 *inuse = &led_driver_dev.inuse;
 
 	if(*inuse)
@@ -272,6 +241,11 @@ static int led_driver_open(struct inode* inode,
 static int led_driver_close(struct inode* inode, 
 		struct file* file)
 {
+	i2c_stop();
+	u8 *inuse = &led_driver_dev.inuse;
+	led_driver_dev.eof = 0;
+	inuse--;
+	led_driver_dev.inuse = *inuse;
 	return 0;
 
 }
@@ -281,6 +255,7 @@ ssize_t led_driver_read(struct file *p_file,
 			size_t count, 
 			loff_t *p_pos)
 {
+	/* XXX: return state */
 	return 0;
 }
 
@@ -307,6 +282,7 @@ ssize_t led_driver_write(struct file *p_file,
 		return -EFAULT;
 	}
 
+	/* Does not work wake user process with signal instead */
 	i2c_buffer[0] = PCA_SLA_W;
 	i2c_buffer[1] = PCA_LS0;
 	i2c_buffer[2] = LED_ON_4;
@@ -317,7 +293,7 @@ ssize_t led_driver_write(struct file *p_file,
 		(void)printk("Error: Start condition could not be issued.\n");
 		return -EFAULT;
 	}
-	return 0;
+	return bytes_written;
 }
 
 static long led_driver_ioctl (struct file *file, 
