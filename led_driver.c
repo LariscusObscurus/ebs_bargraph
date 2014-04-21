@@ -84,6 +84,9 @@ ssize_t led_driver_write(struct file *p_file,
 static long led_driver_ioctl (struct file *file, 
 			unsigned int cmd, 
 			unsigned long arg);
+/* Prototypes */
+
+static int i2c_stop(void);
 
 /* Variables */
 struct led_driver {
@@ -135,15 +138,13 @@ static int led_driver_setup(struct led_driver *dev)
 
 static irqreturn_t led_driver_isr(int irq, void *dev_id)
 {
-	unsigned long stat_value = m_reg_read(I20STAT);
-	(void)printk("DEBUG: IRQ\n");
-	(void)printk("DEBUG: CONSET 0x%x\n", m_reg_read(I20CONSET));
+	u32 stat_value = (u32)m_reg_read(I20STAT);
 	switch(stat_value)
 	{
 	case 0x08:	/* STA issued */
 		(void)printk("DEBUG: IRQ STA\n");
-		m_reg_write(I20DAT, i2c_buffer[0]); /* SLA+W */
-		m_reg_set(I20CONCLR, (I20CONCLR_SI | I20CONCLR_STA));
+		*(volatile unsigned char *)I20DAT = i2c_buffer[0]; /* SLA+W */
+		m_reg_set(I20CONCLR, I20CONCLR_SI | I20CONCLR_STA);
 		i2c_state = I2C_STARTED;
 		break;
 	case 0x10:	/* repeated STA */
@@ -173,9 +174,12 @@ static irqreturn_t led_driver_isr(int irq, void *dev_id)
 			i2c_buffer_index++;
 			i2c_state = DATA_ACK;
 		} else {
+			i2c_stop();
 			i2c_state = DATA_FIN;
 		}
 		m_reg_set(I20CONCLR, I20CONCLR_SI);
+		break;
+	case 0xf8:
 		break;
 	default:
 		(void)printk("DEBUG: stat_value = 0x%x\n", stat_value);
@@ -188,7 +192,7 @@ static irqreturn_t led_driver_isr(int irq, void *dev_id)
 static int i2c_start(void)
 {
 	m_reg_set(I20CONSET, I20CONSET_STA);
-	(void)printk("DEBUG: i2c_start CONSET 0x%x\n", m_reg_read(I20CONSET));
+	(void)printk("DEBUG: i2c_start CONSET 0x%x\n", (u32)m_reg_read(I20CONSET));
 
 	return 0;
 }
@@ -200,25 +204,19 @@ static int i2c_stop(void)
 	return 0;
 }
 
-static int i2c_transaction(void)
-{
-	i2c_start();
-
-	return 0;
-}
-
 static int led_driver_open(struct inode* inode,
 			struct file* file)
 {
 	u8 *inuse = &led_driver_dev.inuse;
 
-	if(*inuse)
+	if(*inuse) {
 		return -EBUSY;
+	}
 
 	inuse++;
 	led_driver_dev.inuse = *inuse;
 	led_driver_dev.eof = 0;
-	
+
 	m_reg_set(PCONP, (1 << 7)); /* Make sure I2C0 is powered */
 	/*XXX: set bit 23 & 25 to 0*/
 	m_reg_set(PINSEL1, (1<<22)); /* SDA0 */
@@ -230,8 +228,8 @@ static int led_driver_open(struct inode* inode,
 			| I20CONCLR_STA 
 			| I20CONCLR_I2EN);
 
-	m_reg_set(I20SCLL, I20SCLL_SCLL);
-	m_reg_set(I20SCLH, I20SCLH_SCLH);
+	m_reg_write(I20SCLL, I20SCLL_SCLL);
+	m_reg_write(I20SCLH, I20SCLH_SCLH);
 	m_reg_set(I20CONSET,  I20CONSET_I2EN);
 
 	return 0;
@@ -241,8 +239,8 @@ static int led_driver_open(struct inode* inode,
 static int led_driver_close(struct inode* inode, 
 		struct file* file)
 {
-	i2c_stop();
 	u8 *inuse = &led_driver_dev.inuse;
+
 	led_driver_dev.eof = 0;
 	inuse--;
 	led_driver_dev.inuse = *inuse;
@@ -265,7 +263,6 @@ ssize_t led_driver_write(struct file *p_file,
 			loff_t *p_pos)
 {
 	char *buf;
-	int ret;
 	u32 bytes_written;
 	u32 val;
 
@@ -282,17 +279,12 @@ ssize_t led_driver_write(struct file *p_file,
 		return -EFAULT;
 	}
 
-	/* Does not work wake user process with signal instead */
 	i2c_buffer[0] = PCA_SLA_W;
 	i2c_buffer[1] = PCA_LS0;
 	i2c_buffer[2] = LED_ON_4;
 	i2c_write_length = 2;
 
-	ret = i2c_transaction();
-	if(ret < 0) {
-		(void)printk("Error: Start condition could not be issued.\n");
-		return -EFAULT;
-	}
+	(void)i2c_start();
 	return bytes_written;
 }
 
@@ -317,17 +309,21 @@ static int __init led_driver_mod_init(void)
 	ret = led_driver_setup(&led_driver_dev);
 	if(ret) {
 		printk("led_driver: Error adding led_driver\n");
+		goto error;
 	}
 	major_devno = MAJOR(devno);
 
 	ret = request_irq(LED_DRIVER_IRQ, led_driver_isr, 0, DEVICE_NAME, NULL);
 	if(ret) {
 		printk("led_driver could not bind interrupt");
-		return ret;
+		goto error;
 	}
 
 	(void)printk("Hello LED\n");
 	return 0;
+error:
+	unregister_chrdev_region(devno, 1);
+	return -1;
 }
 
 static void __exit led_driver_mod_exit(void)
