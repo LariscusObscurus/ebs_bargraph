@@ -84,9 +84,6 @@ ssize_t led_driver_write(struct file *p_file,
 static long led_driver_ioctl (struct file *file, 
 			unsigned int cmd, 
 			unsigned long arg);
-/* Prototypes */
-
-static int i2c_stop(void);
 
 /* Variables */
 struct led_driver {
@@ -138,54 +135,50 @@ static int led_driver_setup(struct led_driver *dev)
 
 static irqreturn_t led_driver_isr(int irq, void *dev_id)
 {
-	u32 stat_value = (u32)m_reg_read(I20STAT);
+	unsigned char stat_value = *(volatile unsigned char*)I20STAT;
 	switch(stat_value)
 	{
 	case 0x08:	/* STA issued */
 		(void)printk("DEBUG: IRQ STA\n");
 		*(volatile unsigned char *)I20DAT = i2c_buffer[0]; /* SLA+W */
-		m_reg_set(I20CONCLR, I20CONCLR_SI | I20CONCLR_STA);
+		m_reg_write(I20CONCLR, I20CONCLR_STA);
 		i2c_state = I2C_STARTED;
 		break;
 	case 0x10:	/* repeated STA */
 		(void)printk("DEBUG: IRQ RESTA\n");
-		m_reg_set(I20CONCLR, (I20CONCLR_SI | I20CONCLR_STA));
+		m_reg_write(I20CONCLR, I20CONCLR_STA);
 		i2c_state = I2C_RESTARTED;
 		break;
 	case 0x18:	/* ACK */
 		(void)printk("DEBUG: IRQ ACK1\n");
-		if(i2c_state == I2C_STARTED) {
-			m_reg_write(I20DAT, i2c_buffer[1 + i2c_buffer_index]);
-			i2c_buffer_index++;
-			i2c_state = DATA_ACK;
-		}
-		m_reg_set(I20CONCLR, I20CONCLR_SI);
-		break;
-	case 0x20:	/* NACK */
-		(void)printk("DEBUG: IRQ NACK\n");
-		m_reg_set(I20CONCLR, I20CONCLR_SI);
-		i2c_state = DATA_NACK;
+		*(volatile unsigned char *)I20DAT = i2c_buffer[1 + i2c_buffer_index];
+		i2c_buffer_index++;
+		i2c_state = DATA_ACK;
 		break;
 	case 0x28:	/* Data transmitted ACK */
-	case 0x30:	/* Data transmitted NACK */
-		(void)printk("DEBUG: IRQ ACK & NACK\n");
+		(void)printk("DEBUG: IRQ ACK\n");
 		if(i2c_buffer_index != i2c_write_length) {
-			m_reg_write(I20DAT, i2c_buffer[1 + i2c_buffer_index]);
+			*(volatile unsigned char *)I20DAT = i2c_buffer[1 + i2c_buffer_index];
 			i2c_buffer_index++;
 			i2c_state = DATA_ACK;
 		} else {
-			i2c_stop();
 			i2c_state = DATA_FIN;
+			goto stop;
 		}
-		m_reg_set(I20CONCLR, I20CONCLR_SI);
 		break;
-	case 0xf8:
+	case 0x20:	/* NACK */
+	case 0x30:	/* Data transmitted NACK */
+		(void)printk("DEBUG: IRQ NACK\n");
+		i2c_state = DATA_NACK;
+		/* fallthrough */
+	stop:
+		m_reg_set(I20CONSET, I20CONSET_STO);
 		break;
 	default:
 		(void)printk("DEBUG: stat_value = 0x%x\n", stat_value);
-		m_reg_set(I20CONCLR, I20CONCLR_SI);
 		break;
 	}
+	m_reg_write(I20CONCLR, I20CONCLR_SI);
 	return IRQ_HANDLED;
 }
 
@@ -194,13 +187,6 @@ static int i2c_start(void)
 	m_reg_set(I20CONSET, I20CONSET_STA);
 	(void)printk("DEBUG: i2c_start CONSET 0x%x\n", (u32)m_reg_read(I20CONSET));
 
-	return 0;
-}
-
-static int i2c_stop(void)
-{
-	m_reg_set(I20CONSET, I20CONSET_STO);
-	m_reg_set(I20CONCLR, I20CONCLR_SI);
 	return 0;
 }
 
@@ -280,7 +266,7 @@ ssize_t led_driver_write(struct file *p_file,
 	}
 
 	i2c_buffer[0] = PCA_SLA_W;
-	i2c_buffer[1] = PCA_LS0;
+	i2c_buffer[1] = PCA_LS2;
 	i2c_buffer[2] = LED_ON_4;
 	i2c_write_length = 2;
 
