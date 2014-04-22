@@ -35,11 +35,12 @@
 /* PCA9532 Register */
 
 #define PCA_SLA_W		0xC0
-#define PCA_LS0			0x06
-#define PCA_LS1			0x07
 #define PCA_LS2			0x08
 #define PCA_LS3			0x09
+#define PCA_LS2_AI		0x18
+#define PCA_LS3_AI		0x19
 
+#define LED_ON_0		0x00
 #define LED_ON_1		0x01
 #define LED_ON_2		0x05
 #define LED_ON_3		0x15
@@ -260,15 +261,54 @@ ssize_t led_driver_write(struct file *p_file,
 	}
 	val = buf[0] - '0';
 
-	if(val >= 8) {
-		(void)printk("Error: Value must be smaller than 9.\n");
+	if((val > 8) || (val < 0)) {
+		(void)printk("Error: Value must be between 0 and 8.\n");
 		return -EFAULT;
 	}
 
+	i2c_buffer_index = 0;
+	i2c_write_length = 3;
+
 	i2c_buffer[0] = PCA_SLA_W;
-	i2c_buffer[1] = PCA_LS2;
-	i2c_buffer[2] = LED_ON_4;
-	i2c_write_length = 2;
+	i2c_buffer[1] = PCA_LS2_AI;
+	switch(val) { /* XXX: Find better solution */
+	case 0:
+		i2c_buffer[2] = LED_ON_0;
+		i2c_buffer[3] = LED_ON_0;
+		break;
+	case 1:
+		i2c_buffer[2] = LED_ON_1;
+		i2c_buffer[3] = LED_ON_0;
+		break;
+	case 2:
+		i2c_buffer[2] = LED_ON_2;
+		i2c_buffer[3] = LED_ON_0;
+		break;
+	case 3:
+		i2c_buffer[2] = LED_ON_3;
+		i2c_buffer[3] = LED_ON_0;
+		break;
+	case 4:
+		i2c_buffer[2] = LED_ON_4;
+		i2c_buffer[3] = LED_ON_0;
+		break;
+	case 5:
+		i2c_buffer[2] = LED_ON_4;
+		i2c_buffer[3] = LED_ON_1;
+		break;
+	case 6:
+		i2c_buffer[2] = LED_ON_4;
+		i2c_buffer[3] = LED_ON_2;
+		break;
+	case 7:
+		i2c_buffer[2] = LED_ON_4;
+		i2c_buffer[3] = LED_ON_3;
+		break;
+	case 8:
+		i2c_buffer[2] = LED_ON_4;
+		i2c_buffer[3] = LED_ON_4;
+		break;
+	}
 
 	(void)i2c_start();
 	return bytes_written;
