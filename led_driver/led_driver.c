@@ -1,3 +1,22 @@
+/*
+   This module implements a driver for LPC2468 led_driver peripheral.
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 2 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+ *************                 version 1.0                    ************
+ */
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/types.h>
@@ -334,7 +353,7 @@ static int __init led_driver_mod_init(void)
 
 	ret = led_driver_setup(&led_driver_dev);
 	if(ret) {
-		printk("led_driver: Error adding led_driver\n");
+		(void)printk("led_driver: Error adding led_driver\n");
 		goto error;
 	}
 	major_devno = MAJOR(devno);
@@ -346,10 +365,11 @@ static int __init led_driver_mod_init(void)
 	}
 
 	(void)printk("Hello LED\n");
+	(void)printk("Call 'mknod /dev/%s c %i 0' to create a device file\n",DEVICE_NAME, major_devno);
 	return 0;
 error:
 	unregister_chrdev_region(devno, 1);
-	return -1;
+	return ret;
 }
 
 static void __exit led_driver_mod_exit(void)
