@@ -21,3 +21,10 @@
 *.i*86
 *.x86_64
 *.hex
+
+#Other
+*.swp
+*.cmd
+*.temp_versions
+*.mod.c
+*.mod

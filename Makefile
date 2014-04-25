@@ -1,22 +1,32 @@
+.PHONY: lpc2468mmc ctest fh_adc timer2 gpio led_driver
 
-# to generate a lst file add the line below to CFLAGS
-#-Wa,-ahlms=$(<:.c=.lst)
+CFLAGS=
+LDFLAGS=
 
-ifneq ($(KERNELRELEASE),)
-#CFLAGS += -march=armv4t -I$(SUBDIRS)/../include
-EXTRA_CFLAGS = -march=armv4t -I$(SUBDIRS)/../include
+all: lpc2468mmc ctest fh_adc timer2 gpio led_driver
 
-	obj-m := led_driver.o
-	adc-objs := led_driver.o
-else
+lpc2468mmc:
+	make -C lpc2468mmc
 
-KERNELDIR = ../../../../../../linux-2.6.x
-PWD := $(shell pwd)
+ctest:
+	make -C ctest
 
-default:
-	$(MAKE) -C $(KERNELDIR) SUBDIRS=$(PWD) modules
+fh_adc:
+	make -C fh_adc
 
-endif
+timer2:
+	make -C timer2
 
+gpio:
+	make -C gpio
+
+led_driver:
+	make -C led_driver
 clean:
-	rm -f *.o *~ *.ko core *.mod.c *.ko.cmd *.o.cmd .*.cmd Module.symvers -r .tmp_versions
+	make -C lpc2468mmc clean
+	make -C ctest clean
+	make -C fh_adc clean
+	make -C timer2 clean
+	make -C gpio clean
+	make -C led_driver clean
+
