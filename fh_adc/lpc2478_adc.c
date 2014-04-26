@@ -343,8 +343,8 @@ static int lpc2478_adc_open(struct inode* inode,
 	volatile u32 tmp = 0;
 	u8 *inuse = &lpc2478_adc_dev.inuse;
 
-	if(*inuse)
-	//	return -EBUSY;
+	/*if(*inuse)
+		return -EBUSY; Does not work*/
 
 	inuse++;
 	lpc2478_adc_dev.inuse = *inuse;

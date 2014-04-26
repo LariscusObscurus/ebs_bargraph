@@ -4,7 +4,7 @@
 
 ifneq ($(KERNELRELEASE),)
 #CFLAGS += -march=armv4t -I$(SUBDIRS)/../include
-EXTRA_CFLAGS = -march=armv4t -I$(SUBDIRS)/../include
+EXTRA_CFLAGS = -march=armv4t -I$(SUBDIRS)/../include -Wall -pedantic -O0 -g
 
 	obj-m := led_driver.o
 	adc-objs := led_driver.o

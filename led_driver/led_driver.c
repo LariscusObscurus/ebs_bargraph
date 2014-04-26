@@ -34,7 +34,6 @@
 #define LED_DRIVER_IRQ		9
 
 #define BUFSIZE			32
-#define MAX_TIMEOUT		0x00FFFFFF
 
 /* Various Register Values */
 #define I20CONSET_I2EN		0x00000040
@@ -64,16 +63,6 @@
 #define LED_ON_2		0x05
 #define LED_ON_3		0x15
 #define LED_ON_4		0x55
-
-
-/* I2C State */
-#define I2C_IDLE		0
-#define I2C_STARTED		1
-#define I2C_RESTARTED		2
-#define I2C_REPEATED_START	3
-#define DATA_ACK		4
-#define DATA_NACK		5
-#define DATA_FIN		6
 
 /* Write or read a whole register at once  */
 #define m_reg_read(reg) (*(volatile unsigned long *)(reg))
@@ -126,10 +115,10 @@ struct file_operations led_driver_fops = {
 static dev_t devno;
 static int major_devno;
 
-static int i2c_state = I2C_IDLE;
 static unsigned char i2c_buffer[BUFSIZE];
 static u32 i2c_buffer_index;
 static u32 i2c_write_length;
+static int lit_leds;
 /* Functions */
 
 static int led_driver_setup(struct led_driver *dev)
@@ -159,43 +148,50 @@ static irqreturn_t led_driver_isr(int irq, void *dev_id)
 	switch(stat_value)
 	{
 	case 0x08:	/* STA issued */
+#ifdef DEBUG
 		(void)printk("DEBUG: IRQ STA\n");
+#endif
 		*(volatile unsigned char *)I20DAT = i2c_buffer[0]; /* SLA+W */
 		m_reg_write(I20CONCLR, I20CONCLR_STA);
-		i2c_state = I2C_STARTED;
 		break;
 	case 0x10:	/* repeated STA */
+#ifdef DEBUG
 		(void)printk("DEBUG: IRQ RESTA\n");
+#endif
 		m_reg_write(I20CONCLR, I20CONCLR_STA);
-		i2c_state = I2C_RESTARTED;
 		break;
 	case 0x18:	/* ACK */
+#ifdef DEBUG
 		(void)printk("DEBUG: IRQ ACK1\n");
+#endif
 		*(volatile unsigned char *)I20DAT = i2c_buffer[1 + i2c_buffer_index];
 		i2c_buffer_index++;
-		i2c_state = DATA_ACK;
 		break;
 	case 0x28:	/* Data transmitted ACK */
+#ifdef DEBUG
 		(void)printk("DEBUG: IRQ ACK\n");
+#endif
 		if(i2c_buffer_index != i2c_write_length) {
 			*(volatile unsigned char *)I20DAT = i2c_buffer[1 + i2c_buffer_index];
 			i2c_buffer_index++;
-			i2c_state = DATA_ACK;
 		} else {
-			i2c_state = DATA_FIN;
 			goto stop;
 		}
 		break;
 	case 0x20:	/* NACK */
 	case 0x30:	/* Data transmitted NACK */
+#ifdef DEBUG
 		(void)printk("DEBUG: IRQ NACK\n");
-		i2c_state = DATA_NACK;
+#endif
+		lit_leds = -1;
 		/* fallthrough */
 	stop:
 		m_reg_set(I20CONSET, I20CONSET_STO);
 		break;
 	default:
+#ifdef DEBUG
 		(void)printk("DEBUG: stat_value = 0x%x\n", stat_value);
+#endif
 		break;
 	}
 	m_reg_write(I20CONCLR, I20CONCLR_SI);
@@ -205,7 +201,9 @@ static irqreturn_t led_driver_isr(int irq, void *dev_id)
 static int i2c_start(void)
 {
 	m_reg_set(I20CONSET, I20CONSET_STA);
+#ifdef DEBUG
 	(void)printk("DEBUG: i2c_start CONSET 0x%x\n", (u32)m_reg_read(I20CONSET));
+#endif
 
 	return 0;
 }
@@ -259,8 +257,18 @@ ssize_t led_driver_read(struct file *p_file,
 			size_t count, 
 			loff_t *p_pos)
 {
-	/* XXX: return state */
-	return 0;
+	char buf[32];
+	u32 bytes_read = 0;
+
+	if(led_driver_dev.eof)
+		return 0;/*EOF*/
+
+	(void)snprintf(buf, 32, "%d LEDs are lit\n", lit_leds);
+
+	bytes_read = strlen(buf) + 1;
+	bytes_read -= copy_to_user(p_buf, buf, bytes_read);
+	led_driver_dev.eof = 1;
+	return bytes_read;
 }
 
 ssize_t led_driver_write(struct file *p_file, 
@@ -282,8 +290,9 @@ ssize_t led_driver_write(struct file *p_file,
 
 	if((val > 8) || (val < 0)) {
 		(void)printk("Error: Value must be between 0 and 8.\n");
-		return -EFAULT;
+		return bytes_written; 
 	}
+	lit_leds = val;
 
 	i2c_buffer_index = 0;
 	i2c_write_length = 3;
@@ -360,7 +369,7 @@ static int __init led_driver_mod_init(void)
 
 	ret = request_irq(LED_DRIVER_IRQ, led_driver_isr, 0, DEVICE_NAME, NULL);
 	if(ret) {
-		printk("led_driver could not bind interrupt");
+		(void)printk("led_driver could not bind interrupt");
 		goto error;
 	}
 
